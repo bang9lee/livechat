@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>실시간 채팅</title>
+    
+    <!-- ✅ Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database.js"></script>
+
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #ffffff; margin: 0; padding: 0; }
+        .container { display: flex; width: 80%; height: 500px; margin: auto; border: 1px solid #ccc; border-radius: 10px; overflow: hidden; background: white; }
+        .users { width: 20%; background: #1778F2; padding: 10px; text-align: center; color: white; overflow-y: auto; }
+        .chat-box { flex: 1; display: flex; flex-direction: column; padding: 10px; overflow-y: auto; }
+        
+        /* ✅ 채팅 입력 칸을 하단에 고정 */
+        .input-area {
+            display: flex;
+            position: fixed;
+            bottom: 0;
+            width: 80%;
+            left: 10%;
+            padding: 10px;
+            background: #f8f8f8;
+            border-top: 1px solid #ccc;
+        }
+
+        .input-area input, .input-area button {
+            padding: 6px;
+            margin-right: 5px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+
+        button { background-color: #007bff; color: white; border: none; border-radius: 20px; padding: 6px 12px; cursor: pointer; }
+        button:hover { background-color: #0056b3; }
+        .my-message { text-align: right; }
+        .other-message { text-align: left; }
+        #user-list div { color: white; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="users">
+            <h3>현재 접속 중 (<span id="user-count">0</span>명)</h3>
+            <div id="user-list"></div>
+            <button onclick="clearChat()">대화 초기화</button>
+        </div>
+        <div class="chat-box" id="chat-box"></div>
+    </div>
+
+    <div class="input-area">
+        <input type="color" id="colorPicker" value="#000000">
+        <input type="text" id="username" placeholder="닉네임 설정" oninput="updateUserList()">
+        <input type="text" id="message" placeholder="메시지를 입력하세요..." onkeypress="handleKeyPress(event)">
+        <button onclick="sendMessage()">전송</button>
+    </div>
+
+    <script>
+        // ✅ Firebase 설정 (.env에서 가져오기)
+        const firebaseConfig = {
+            apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+            authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+            databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL,
+            projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+            storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+            messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+            appId: import.meta.env.VITE_FIREBASE_APP_ID,
+            measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
+        };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+
+        let usernameInput = document.getElementById("username");
+        let chatBox = document.getElementById("chat-box");
+        let userList = document.getElementById("user-list");
+        let userCount = document.getElementById("user-count");
+        let colorPicker = document.getElementById("colorPicker");
+        let currentUsername = localStorage.getItem("username") || "";
+
+        if (currentUsername) {
+            usernameInput.value = currentUsername;
+            updateUserList();
+        }
+
+        // ✅ 닉네임 설정 & 실시간 적용 (중복 방지)
+        function updateUserList() {
+            let newUsername = usernameInput.value.trim();
+            if (!newUsername) return;
+
+            let usersRef = db.ref("users");
+            usersRef.once("value", (snapshot) => {
+                let users = snapshot.val() || {};
+                if (currentUsername && users[currentUsername]) {
+                    db.ref("users/" + currentUsername).remove();
+                }
+                db.ref("users/" + newUsername).set(true);
+                localStorage.setItem("username", newUsername);
+                currentUsername = newUsername;
+            });
+        }
+
+        usernameInput.addEventListener("change", updateUserList);
+
+        // ✅ 현재 접속자 목록 실시간 업데이트
+        db.ref("users").on("value", (snapshot) => {
+            let users = snapshot.val() || {};
+            userList.innerHTML = "";
+            Object.keys(users).forEach(user => {
+                let div = document.createElement("div");
+                div.innerText = user;
+                userList.appendChild(div);
+            });
+            userCount.innerText = Object.keys(users).length;
+        });
+
+        // ✅ 메시지 전송
+        function sendMessage() {
+            let messageInput = document.getElementById("message");
+            let message = messageInput.value.trim();
+            if (!message || usernameInput.value.trim() === "") return;
+
+            let chatMessage = { username: currentUsername, message: message, color: colorPicker.value };
+            db.ref("messages").push(chatMessage);
+            messageInput.value = "";
+        }
+
+        // ✅ Enter 키로 메시지 전송
+        function handleKeyPress(event) {
+            if (event.key === "Enter") sendMessage();
+        }
+
+        // ✅ Firebase에서 메시지 불러오기 (실시간 업데이트)
+        db.ref("messages").on("child_added", (snapshot) => {
+            let data = snapshot.val();
+            let msgDiv = document.createElement("div");
+            msgDiv.style.color = data.color !== "#ffffff" ? data.color : "#000000";
+            msgDiv.className = data.username === currentUsername ? "my-message" : "other-message";
+            msgDiv.innerHTML = `<strong>${data.username}</strong>: ${data.message}`;
+            chatBox.appendChild(msgDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        });
+
+        // ✅ 대화 초기화 버튼
+        function clearChat() {
+            db.ref("messages").remove();
+            chatBox.innerHTML = "";
+        }
+    </script>
+</body>
+</html>
